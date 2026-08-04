@@ -1,0 +1,22 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Capacitor / Android (added when the mobile wrapper is set up)
+android/
+ios/
+
+# Local tooling, AI-workflow artifacts, and scratch (not needed at origin)
+CLAUDE.md
+.claude/
+.superpowers/
+docs/superpowers/
+chat.md
+image.png
