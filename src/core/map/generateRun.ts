@@ -11,7 +11,7 @@ const ZONE_EVENTS: Partial<Record<Zone, EventType[]>> = {
   'masked-men': ['train', 'recruit', 'combat'],
   'bookers-guild': ['shop', 'recruit', 'camp', 'train'],
   'rain-tribe': ['combat', 'train', 'camp', 'recruit', 'shop'],
-  'sand-riders': ['combat', 'wager', 'camp', 'recruit'],
+  'the-crimson-ordas': ['combat', 'wager', 'camp', 'recruit'],
 }
 
 // Fallback for nodes without a zone (e.g. the legacy MAP fixture).

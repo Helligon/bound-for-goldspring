@@ -11,7 +11,7 @@ import type { MapDefinition } from './types'
 //
 // Capital labels follow the vault: Bookers Guild -> Bookerport,
 // Masked Men -> Ashfall (volcano), Rain Tribe -> the Oxbow (river/forest),
-// Sand Riders -> the Dunes.
+// The Crimson Ordas -> the Dunes.
 
 export const MAP: MapDefinition = {
   nodes: [
@@ -20,7 +20,7 @@ export const MAP: MapDefinition = {
     // top-right, Bookerport bottom-left, Ironwood (Oxbow) bottom-right.
     // Symmetric, so every capital is equidistant from the centre.
     { id: 'ashfall', label: 'Ashfall', kind: 'capital', faction: 'masked-men', x: 10, y: -290 },
-    { id: 'dunes', label: 'The Dunes', kind: 'capital', faction: 'sand-riders', x: 1990, y: -290 },
+    { id: 'dunes', label: 'The Dunes', kind: 'capital', faction: 'the-crimson-ordas', x: 1990, y: -290 },
     { id: 'bookerport', label: 'Bookerport', kind: 'capital', faction: 'bookers-guild', x: 10, y: 1690 },
     { id: 'oxbow', label: 'The Oxbow', kind: 'capital', faction: 'rain-tribe', x: 1990, y: 1690 },
 

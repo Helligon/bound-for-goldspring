@@ -260,7 +260,7 @@ body {
   fill: #2f7d32;
   stroke: #2f7d32;
 }
-.zone-area.zone--sand-riders {
+.zone-area.zone--the-crimson-ordas {
   fill: #f2e13a;
   stroke: #c9a81f;
 }
@@ -364,7 +364,7 @@ body {
 .node.zone--rain-tribe circle {
   fill: #2f7d32;
 }
-.node.zone--sand-riders circle {
+.node.zone--the-crimson-ordas circle {
   fill: #f2e13a;
 }
 

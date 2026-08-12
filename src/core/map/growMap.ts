@@ -36,7 +36,7 @@ const FACTION_COUNTS: Record<Faction, number> = {
   'bookers-guild': 15,
   'masked-men': 10,
   'rain-tribe': 8,
-  'sand-riders': 5,
+  'the-crimson-ordas': 5,
 }
 
 // Blob tightness per faction. Bookerport is a city, so it packs dense (small
@@ -45,24 +45,24 @@ const BLOB_SPREAD: Record<Faction, number> = {
   'bookers-guild': 46,
   'masked-men': 70,
   'rain-tribe': 70,
-  'sand-riders': 74,
+  'the-crimson-ordas': 74,
 }
 const BLOB_SPACING: Record<Faction, number> = {
   'bookers-guild': 84,
   'masked-men': 110,
   'rain-tribe': 110,
-  'sand-riders': 118,
+  'the-crimson-ordas': 118,
 }
 
 const ERRATIC: Record<Faction, number> = {
   'rain-tribe': 0.22,
   'masked-men': 0.13,
   'bookers-guild': 0.08,
-  'sand-riders': 0.05,
+  'the-crimson-ordas': 0.05,
 }
 
 const ZONE_PAD: Record<string, number> = {
-  'sand-riders': 700,
+  'the-crimson-ordas': 700,
   'masked-men': 90,
   'rain-tribe': 90,
   'bookers-guild': 80,
@@ -72,7 +72,7 @@ const CITY_PAD = 55
 // Zone-specific maximum edge length: long roads across the open desert, short
 // hops inside the dense city.
 const ZONE_MAX_EDGE: Record<string, number> = {
-  'sand-riders': 1000,
+  'the-crimson-ordas': 1000,
   'great-fields': 700,
   'city-of-goldspring': 320,
   'bookers-guild': 360,
@@ -309,8 +309,8 @@ function build(seed: string, cfg: GenConfig = {}): MapDefinition {
     const hull = convexHull(seed)
     // The Gold Sea desert sprawls outward/sideways only, not toward the centre.
     const poly =
-      capital.faction === 'sand-riders'
-        ? expandDirectional(hull, ZONE_PAD['sand-riders'], cx, cy)
+      capital.faction === 'the-crimson-ordas'
+        ? expandDirectional(hull, ZONE_PAD['the-crimson-ordas'], cx, cy)
         : expandVaried(hull, ZONE_PAD[capital.faction!] ?? 80)
     factionPolys.push({ zone: capital.faction!, points: poly })
     regions.push({ zone: capital.faction!, kind: 'polygon', points: poly })

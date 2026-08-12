@@ -88,7 +88,7 @@ describe('growMap (organic, trunk roads)', () => {
       expect(c['bookers-guild']).toBeGreaterThanOrEqual(15)
       expect(c['masked-men']).toBeGreaterThanOrEqual(10)
       expect(c['rain-tribe']).toBeGreaterThanOrEqual(8)
-      expect(c['sand-riders']).toBeGreaterThanOrEqual(5)
+      expect(c['the-crimson-ordas']).toBeGreaterThanOrEqual(5)
       expect(c['city-of-goldspring']).toBeGreaterThanOrEqual(18)
     }
   })

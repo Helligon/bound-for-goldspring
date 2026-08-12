@@ -24,6 +24,26 @@ export { actionsFor, canResolve, resolveAction } from './game/encounters'
 export type { EncounterAction, EncounterActionId } from './game/encounters'
 export { travelStep } from './game/run'
 export type { StepResult } from './game/run'
+export { applyModifiers, ZERO_STATS } from './entities/stats'
+export type { Stats, StatModifiers } from './entities/stats'
+export type {
+  Rank,
+  WeaponType,
+  ItemKind,
+  TraitCategory,
+  EnemyType,
+  Capability,
+  Affiliation,
+  Combatant,
+  Trait,
+  Companion,
+  Enemy,
+  Item,
+  PartyMember,
+  Nation,
+  Race,
+  Profession,
+} from './entities/types'
 export { ZONE_LABELS, ZONE_AREA } from './map/types'
 export {
   CAPITAL_RULES,

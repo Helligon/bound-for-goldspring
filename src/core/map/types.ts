@@ -7,7 +7,7 @@ export type Faction =
   | 'bookers-guild'
   | 'masked-men'
   | 'rain-tribe'
-  | 'sand-riders'
+  | 'the-crimson-ordas'
 
 // Every node belongs to a zone (biome/territory). Radially from the centre:
 // the Aelder Fountain (goal), the City of Goldspring (inner ring), the Great
@@ -26,7 +26,7 @@ export const ZONE_LABELS: Record<Zone, string> = {
   'bookers-guild': 'Bookerport',
   'masked-men': 'Ashfall',
   'rain-tribe': 'Ironwood Forest',
-  'sand-riders': 'The Gold Sea',
+  'the-crimson-ordas': 'The Gold Sea',
 }
 
 // Relative spatial footprint of each zone. Combined with the node count, this
@@ -40,7 +40,7 @@ export const ZONE_AREA: Record<Zone, number> = {
   'bookers-guild': 68,
   'masked-men': 90,
   'rain-tribe': 72,
-  'sand-riders': 340,
+  'the-crimson-ordas': 340,
 }
 
 // Encounter types a node can present. From Mechanics/Basic gameplay.md, plus

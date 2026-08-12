@@ -136,8 +136,8 @@ describe('generateRun zone event rules', () => {
     expect(eventsInZone('rain-tribe').has('wager')).toBe(false)
   })
 
-  it('The Gold Sea (Sand Riders): no shop or train', () => {
-    const events = eventsInZone('sand-riders')
+  it('The Gold Sea (The Crimson Ordas): no shop or train', () => {
+    const events = eventsInZone('the-crimson-ordas')
     expect(events.has('shop')).toBe(false)
     expect(events.has('train')).toBe(false)
   })

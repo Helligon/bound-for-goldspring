@@ -55,7 +55,7 @@ const OUTLINED_ZONES = [
   'bookers-guild',
   'masked-men',
   'rain-tribe',
-  'sand-riders',
+  'the-crimson-ordas',
 ] as const
 
 interface Pt {
@@ -150,7 +150,7 @@ function smoothOpenPath(pts: Pt[]): string {
 // Perimeter padding per zone (map units). The Gold Sea is a vast desert, so its
 // outline extends well beyond its sparse nodes.
 const ZONE_PAD: Record<string, number> = {
-  'sand-riders': 320,
+  'the-crimson-ordas': 320,
   'masked-men': 80,
   'rain-tribe': 80,
   'bookers-guild': 70,
