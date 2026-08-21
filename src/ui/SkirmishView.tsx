@@ -1,0 +1,754 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { allHexes, combatantById, COMBATANTS, inBounds, traceBattle, Rng } from '../core'
+import type { BattleSetup, CombatEvent, Field, FrameUnit, Hex, Placement, Side } from '../core'
+
+// Events that land damage this tick, drawn as floating numbers over the field.
+type HitEvent = Extract<CombatEvent, { kind: 'attack' } | { kind: 'poison' }>
+
+// The standalone skirmish sim: a viewport over the combat core. It holds no
+// rules. Two phases: deploy (build both parties, then drag your units around
+// your zone) and battle (watch traceBattle play the fight out, with a log).
+
+interface Preset {
+  label: string
+  party: string[]
+}
+
+// Quick-fill parties. Either side can load any of these, then edit freely.
+const PRESETS: Record<string, Preset> = {
+  bandits: { label: 'Bandits', party: ['neutral-sellsword', 'neutral-bandit', 'neutral-bandit', 'neutral-crossbowman'] },
+  beasts: { label: 'Wild beasts', party: ['neutral-legendary-beast', 'neutral-wolf', 'neutral-wolf', 'neutral-boar'] },
+  masked: { label: 'Masked Men', party: ['masked-boar-rider', 'masked-fury-berserker', 'masked-fearmonger', 'masked-fearmonger'] },
+  rain: { label: 'Rain Tribe', party: ['rain-bond-beast', 'rain-spear-warden', 'rain-blowgun-hunter', 'rain-blowgun-hunter'] },
+  ordas: { label: 'Crimson Ordas', party: ['ordas-veil-drunk-charger', 'ordas-blade-dancer', 'ordas-mounted-archer', 'ordas-mounted-archer'] },
+  bookers: { label: 'Bookers', party: ['bookers-cinder-adept', 'bookers-hired-blade', 'bookers-powder-clerk', 'bookers-powder-clerk'] },
+  goldspring: { label: 'Goldspring', party: ['goldspring-gilded-executioner', 'goldspring-fountain-warden', 'goldspring-ash-sentinel', 'goldspring-powder-marshal'] },
+}
+
+// Roster grouping for the add-unit control, in display order.
+const AFFILIATIONS: { id: string; label: string }[] = [
+  { id: 'neutral', label: 'Neutral' },
+  { id: 'bookers-guild', label: 'Bookers Guild' },
+  { id: 'masked-men', label: 'Masked Men' },
+  { id: 'rain-tribe', label: 'Rain Tribe' },
+  { id: 'the-crimson-ordas', label: 'The Crimson Ordas' },
+  { id: 'goldspring', label: 'Goldspring' },
+]
+
+const HEX = 30
+const SQRT3 = Math.sqrt(3)
+const FRAME_MS = 280 // base playback duration per frame, at 1x
+const SPEEDS = [1, 2] as const
+const MAX_DEPLOY_COLS = 3 // deployment-zone depth per side, clamped to field width
+
+// Battlefields tied to the areas of the wider map: each sets a size and a terrain
+// theme (its palette now, the hook for terrain modifiers later). Most are full
+// fields; structural battlefields (River Crossing) come in a later pass.
+type Size = 'small' | 'medium' | 'large'
+type Theme = 'grass' | 'ash' | 'sand' | 'jungle' | 'streets'
+interface Battlefield {
+  id: string
+  label: string
+  size: Size
+  theme: Theme
+}
+
+const BATTLEFIELDS: Battlefield[] = [
+  { id: 'great-fields', label: 'Great Fields', size: 'large', theme: 'grass' },
+  { id: 'ashfall', label: 'Ashfall', size: 'large', theme: 'ash' },
+  { id: 'gold-sea', label: 'The Gold Sea', size: 'large', theme: 'sand' },
+  { id: 'ironwood', label: 'Ironwood Forest', size: 'medium', theme: 'jungle' },
+  { id: 'goldspring', label: 'Goldspring', size: 'medium', theme: 'streets' },
+]
+
+const SIZE_DIMS: Record<Size, { width: number; height: number }> = {
+  small: { width: 7, height: 5 },
+  medium: { width: 8, height: 6 },
+  large: { width: 10, height: 7 },
+}
+
+/** The battlefield for a seed: reproducible, so the same seed replays it. */
+function battlefieldForSeed(seed: string): Battlefield {
+  return BATTLEFIELDS[new Rng(`field:${seed}`).int(0, BATTLEFIELDS.length - 1)]
+}
+
+const INITIAL_FIELD: Field = { ...SIZE_DIMS[battlefieldForSeed('skirmish-1').size] }
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
+const deployColsFor = (field: Field) => Math.max(1, Math.min(MAX_DEPLOY_COLS, Math.floor(field.width / 2)))
+
+function hexToPixel(q: number, r: number): { x: number; y: number } {
+  return { x: HEX * SQRT3 * (q + r / 2), y: HEX * 1.5 * r }
+}
+
+function hexCorners(cx: number, cy: number): string {
+  const pts: string[] = []
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 180) * (60 * i - 30)
+    pts.push(`${(cx + HEX * Math.cos(a)).toFixed(2)},${(cy + HEX * Math.sin(a)).toFixed(2)}`)
+  }
+  return pts.join(' ')
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+interface PlayerUnit {
+  instanceId: string
+  sheetId: string
+  name: string
+}
+
+/** Instance list for a party (stable ids by index, so duplicates are distinct). */
+function partyToUnits(party: string[]): PlayerUnit[] {
+  return party.map((sheetId, i) => ({
+    instanceId: `${sheetId}#${i}`,
+    sheetId,
+    name: combatantById(sheetId)!.name,
+  }))
+}
+
+/** The valid hexes of a side's deployment zone, ordered for filling: the player's
+ * left columns front-to-back, the enemy's right columns from the edge inward. */
+function zoneCells(field: Field, side: Side, cols: number): Hex[] {
+  const out: Hex[] = []
+  const qs =
+    side === 'player'
+      ? Array.from({ length: cols }, (_, i) => i)
+      : Array.from({ length: cols }, (_, i) => field.width - 1 - i)
+  for (const q of qs) {
+    for (let r = 0; r < field.height; r++) {
+      if (inBounds(field, { q, r })) out.push({ q, r })
+    }
+  }
+  return out
+}
+
+/** Deploy a party onto the first valid hexes of its zone. */
+function fillZone(party: string[], field: Field, side: Side, cols: number): Placement[] {
+  const cells = zoneCells(field, side, cols)
+  return party.map((id, i) => ({
+    sheet: combatantById(id)!,
+    pos: cells[Math.min(i, cells.length - 1)] ?? { q: 0, r: 0 },
+  }))
+}
+
+/** Starting layout for the player: the first valid hexes of the left zone. */
+function defaultPlacement(units: PlayerUnit[], field: Field, cols: number): Record<string, Hex> {
+  const cells = zoneCells(field, 'player', cols)
+  const out: Record<string, Hex> = {}
+  units.forEach((u, i) => {
+    out[u.instanceId] = cells[Math.min(i, cells.length - 1)] ?? { q: 0, r: 0 }
+  })
+  return out
+}
+
+/** A party-editing panel for one side (deploy phase). */
+function PartyEditor({
+  title,
+  party,
+  max,
+  onAdd,
+  onRemove,
+  onPreset,
+}: {
+  title: string
+  party: string[]
+  max: number
+  onAdd: (sheetId: string) => void
+  onRemove: (index: number) => void
+  onPreset: (key: string) => void
+}) {
+  const [sel, setSel] = useState(COMBATANTS[0].id)
+  return (
+    <div className="party-editor">
+      <h3>
+        {title} <span className="hint">{party.length}/{max}</span>
+      </h3>
+      <div className="party-editor__presets">
+        {Object.entries(PRESETS).map(([k, p]) => (
+          <button key={k} className="btn" onClick={() => onPreset(k)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <ul className="party-editor__list">
+        {party.length === 0 && <li className="hint">empty — add units or load a preset</li>}
+        {party.map((id, i) => (
+          <li key={i}>
+            <span>{combatantById(id)!.name}</span>
+            <button className="btn btn--x" aria-label={`Remove ${combatantById(id)!.name}`} onClick={() => onRemove(i)}>
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="party-editor__add">
+        <select value={sel} onChange={(e) => setSel(e.target.value)}>
+          {AFFILIATIONS.map((a) => (
+            <optgroup key={a.id} label={a.label}>
+              {COMBATANTS.filter((c) => c.affiliation === a.id).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <button className="btn" disabled={party.length >= max} onClick={() => onAdd(sel)}>
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** One combat-log line for an event. */
+function LogLine({ e }: { e: CombatEvent }) {
+  const t = <span className="log__tick">t{e.tick}</span>
+  switch (e.kind) {
+    case 'attack':
+      return (
+        <div className="log__line">
+          {t} {e.attackerName} → {e.targetName} <strong>{e.amount}</strong>
+          {e.crit && <span className="badge badge--crit">crit</span>}
+          {e.charge && <span className="badge badge--charge">charge</span>}
+          {e.flank && <span className="badge badge--flank">flank</span>}
+        </div>
+      )
+    case 'poison':
+      return (
+        <div className="log__line">
+          {t} {e.unitName} poisoned <strong>−{e.amount}</strong>
+        </div>
+      )
+    case 'down':
+      return (
+        <div className="log__line log__line--down">
+          {t} {e.unitName} is down
+        </div>
+      )
+    case 'death':
+      return (
+        <div className="log__line log__line--death">
+          {t} {e.unitName} dies
+        </div>
+      )
+    case 'save':
+      return (
+        <div className="log__line log__line--save">
+          {t} {e.unitName} save {e.roll}≥{e.threshold} {e.survived ? '✓ steadies' : '✗ dies'}
+        </div>
+      )
+  }
+}
+
+export function SkirmishView() {
+  const [field, setField] = useState<Field>(INITIAL_FIELD)
+  const [battlefieldMode, setBattlefieldMode] = useState<'auto' | string>('auto')
+  const [playerParty, setPlayerParty] = useState<string[]>(() => [...PRESETS.masked.party])
+  const [enemyParty, setEnemyParty] = useState<string[]>(() => [...PRESETS.bandits.party])
+  const [seed, setSeed] = useState('skirmish-1')
+  const [phase, setPhase] = useState<'deploy' | 'battle'>('deploy')
+  const [placement, setPlacement] = useState<Record<string, Hex>>(() =>
+    defaultPlacement(partyToUnits(PRESETS.masked.party), INITIAL_FIELD, deployColsFor(INITIAL_FIELD)),
+  )
+  const [tick, setTick] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState(1)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
+
+  const svgRef = useRef<SVGSVGElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+
+  // The active battlefield: the seed's by default, or a manual override. Picking
+  // one sets the field to its size; W/H can then be tweaked freely.
+  const activeBattlefield =
+    battlefieldMode === 'auto'
+      ? battlefieldForSeed(seed)
+      : BATTLEFIELDS.find((b) => b.id === battlefieldMode) ?? battlefieldForSeed(seed)
+  useEffect(() => {
+    const dims = SIZE_DIMS[activeBattlefield.size]
+    setField((f) => (f.width === dims.width && f.height === dims.height ? f : { ...f, ...dims }))
+  }, [activeBattlefield.id])
+
+  const playerUnits = useMemo(() => partyToUnits(playerParty), [playerParty])
+  const hexes = useMemo(() => allHexes(field), [field])
+  const deployCols = useMemo(() => deployColsFor(field), [field])
+  const maxParty = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.min(field.height, zoneCells(field, 'player', deployCols).length, zoneCells(field, 'enemy', deployCols).length),
+      ),
+    [field, deployCols],
+  )
+
+  // Editing the player party (or the field) resets the layout and returns to
+  // deploy; editing the enemy party just returns to deploy.
+  useEffect(() => {
+    setPlacement(defaultPlacement(playerUnits, field, deployCols))
+    setPhase('deploy')
+    setTick(0)
+  }, [playerUnits, field, deployCols])
+  useEffect(() => {
+    setPhase('deploy')
+    setTick(0)
+  }, [enemyParty])
+
+  const enemyPlacements = useMemo(
+    () => fillZone(enemyParty, field, 'enemy', deployCols),
+    [enemyParty, field, deployCols],
+  )
+
+  const setup: BattleSetup = useMemo(
+    () => ({
+      field,
+      player: playerUnits.map((u) => ({
+        sheet: combatantById(u.sheetId)!,
+        pos: placement[u.instanceId] ?? { q: 0, r: 0 },
+      })),
+      enemy: enemyPlacements,
+    }),
+    [playerUnits, placement, enemyPlacements, field],
+  )
+
+  const trace = useMemo(
+    () => (phase === 'battle' ? traceBattle(setup, new Rng(seed)) : null),
+    [phase, setup, seed],
+  )
+
+  useEffect(() => {
+    if (!trace) return
+    setTick(0)
+    setPlaying(true)
+  }, [trace])
+
+  useEffect(() => {
+    if (!trace || !playing) return
+    if (tick >= trace.frames.length - 1) {
+      setPlaying(false)
+      return
+    }
+    const id = setTimeout(() => setTick((t) => Math.min(trace.frames.length - 1, t + 1)), FRAME_MS / speed)
+    return () => clearTimeout(id)
+  }, [trace, playing, tick, speed])
+
+  const frame = trace ? trace.frames[Math.min(tick, trace.frames.length - 1)] : null
+  const atEnd = trace ? tick >= trace.frames.length - 1 : false
+
+  // The blows that landed on the frame currently shown, for the hit overlay.
+  const hitEvents: HitEvent[] =
+    trace && frame
+      ? trace.events.filter(
+          (e): e is HitEvent => e.tick === frame.tick && (e.kind === 'attack' || e.kind === 'poison'),
+        )
+      : []
+
+  const shownEvents = trace ? trace.events.filter((e) => e.tick <= (frame?.tick ?? 0)) : []
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [tick, trace])
+
+  const outcomeById = useMemo(() => new Map((trace?.result.units ?? []).map((u) => [u.id, u])), [trace])
+  const statusOf = (u: FrameUnit): 'dead' | 'down' | 'alive' => {
+    if (atEnd) {
+      const o = outcomeById.get(u.id)
+      if (o) return o.dead ? 'dead' : o.downed ? 'down' : 'alive'
+    }
+    return u.dead ? 'dead' : u.down ? 'down' : 'alive'
+  }
+  const healthOf = (u: FrameUnit): number =>
+    atEnd && outcomeById.get(u.id) ? Math.max(0, outcomeById.get(u.id)!.health) : u.health
+
+  // --- Drag-to-place (deploy phase only) ---
+  const toSvg = (clientX: number, clientY: number) => {
+    const svg = svgRef.current!
+    const pt = svg.createSVGPoint()
+    pt.x = clientX
+    pt.y = clientY
+    return pt.matrixTransform(svg.getScreenCTM()!.inverse())
+  }
+  const hexAt = (x: number, y: number): Hex | null => {
+    let best: Hex | null = null
+    let bd = Infinity
+    for (const h of hexes) {
+      const c = hexToPixel(h.q, h.r)
+      const d = Math.hypot(c.x - x, c.y - y)
+      if (d < bd) {
+        bd = d
+        best = h
+      }
+    }
+    return bd <= HEX ? best : null
+  }
+  const onTokenDown = (e: React.PointerEvent, instanceId: string) => {
+    if (phase !== 'deploy') return
+    e.stopPropagation()
+    try {
+      svgRef.current?.setPointerCapture(e.pointerId)
+    } catch {
+      // Non-capturable pointer (e.g. synthetic); dragging still works over the svg.
+    }
+    setDragging(instanceId)
+    const p = toSvg(e.clientX, e.clientY)
+    setGhost({ x: p.x, y: p.y })
+  }
+  const onSvgMove = (e: React.PointerEvent) => {
+    if (!dragging) return
+    const p = toSvg(e.clientX, e.clientY)
+    setGhost({ x: p.x, y: p.y })
+  }
+  const onSvgUp = (e: React.PointerEvent) => {
+    if (!dragging) return
+    const p = toSvg(e.clientX, e.clientY)
+    const h = hexAt(p.x, p.y)
+    if (h && inBounds(field, h) && h.q < deployCols) {
+      setPlacement((prev) => {
+        const next = { ...prev }
+        const occupant = Object.keys(next).find((k) => k !== dragging && next[k].q === h.q && next[k].r === h.r)
+        if (occupant) next[occupant] = next[dragging] // swap
+        next[dragging] = h
+        return next
+      })
+    }
+    try {
+      svgRef.current?.releasePointerCapture(e.pointerId)
+    } catch {
+      // Ignore if this pointer was never captured.
+    }
+    setDragging(null)
+    setGhost(null)
+  }
+
+  // Viewbox framed to all hex centres, padded by a hex.
+  const centres = hexes.map((h) => hexToPixel(h.q, h.r))
+  const xs = centres.map((c) => c.x)
+  const ys = centres.map((c) => c.y)
+  const minX = Math.min(...xs) - HEX * 1.3
+  const minY = Math.min(...ys) - HEX * 1.3
+  const vbW = Math.max(...xs) - Math.min(...xs) + HEX * 2.6
+  const vbH = Math.max(...ys) - Math.min(...ys) + HEX * 2.6
+
+  const winnerLabel =
+    trace?.result.winner === 'player' ? 'You win' : trace?.result.winner === 'enemy' ? 'Enemy wins' : 'Draw'
+  const survivors = (side: Side) => (trace?.result.units ?? []).filter((u) => u.side === side && u.alive).length
+
+  const zoneClass = (q: number) =>
+    q < deployCols ? ' hex-cell--player' : q >= field.width - deployCols ? ' hex-cell--enemy' : ''
+
+  const addTo = (setter: typeof setPlayerParty) => (sheetId: string) =>
+    setter((p) => (p.length >= maxParty ? p : [...p, sheetId]))
+  const removeFrom = (setter: typeof setPlayerParty) => (index: number) =>
+    setter((p) => p.filter((_, i) => i !== index))
+  const presetTo = (setter: typeof setPlayerParty) => (key: string) => setter([...PRESETS[key].party])
+
+  const canFight = playerParty.length > 0 && enemyParty.length > 0
+
+  return (
+    <div className="skirmish">
+      <header className="app__header">
+        <a className="btn" href="#/">
+          ◀ Map
+        </a>
+        <h1>Skirmish</h1>
+        <label className="seed">
+          Seed:
+          <input value={seed} onChange={(e) => setSeed(e.target.value)} />
+        </label>
+        <button className="btn" onClick={() => setSeed(`skirmish-${Math.floor(Math.random() * 1000)}`)}>
+          New seed
+        </button>
+        <div className="field-ctrl" role="group" aria-label="Map size">
+          <label>
+            W
+            <input
+              type="number"
+              min={4}
+              max={14}
+              value={field.width}
+              onChange={(e) => setField((f) => ({ ...f, width: clamp(Math.round(Number(e.target.value)) || f.width, 4, 14) }))}
+            />
+          </label>
+          <label>
+            H
+            <input
+              type="number"
+              min={3}
+              max={12}
+              value={field.height}
+              onChange={(e) => setField((f) => ({ ...f, height: clamp(Math.round(Number(e.target.value)) || f.height, 3, 12) }))}
+            />
+          </label>
+          <label>
+            Area
+            <select value={battlefieldMode} onChange={(e) => setBattlefieldMode(e.target.value)}>
+              <option value="auto">Auto</option>
+              {BATTLEFIELDS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="hint">
+            {activeBattlefield.label} · {hexes.length} hexes
+          </span>
+        </div>
+        {phase === 'deploy' ? (
+          <button className="btn btn--active" disabled={!canFight} onClick={() => setPhase('battle')}>
+            Fight ▶
+          </button>
+        ) : (
+          <button className="btn" onClick={() => setPhase('deploy')}>
+            ◀ Redeploy
+          </button>
+        )}
+      </header>
+
+      <main className="skirmish__body">
+        <div className="skirmish__field-wrap">
+          <svg
+            ref={svgRef}
+            className={`skirmish-field theme-${activeBattlefield.theme}`}
+            viewBox={`${minX} ${minY} ${vbW} ${vbH}`}
+            preserveAspectRatio="xMidYMid meet"
+            role="img"
+            aria-label="Battlefield"
+            onPointerMove={onSvgMove}
+            onPointerUp={onSvgUp}
+          >
+            {hexes.map((h) => {
+              const { x, y } = hexToPixel(h.q, h.r)
+              return <polygon key={`${h.q},${h.r}`} className={`hex-cell${zoneClass(h.q)}`} points={hexCorners(x, y)} />
+            })}
+
+            {phase === 'battle' && frame ? (
+              <>
+                {frame.units.map((u) => {
+                  const { x, y } = hexToPixel(u.q, u.r)
+                  const st = statusOf(u)
+                  const state = st === 'dead' ? ' unit--dead' : st === 'down' ? ' unit--down' : ''
+                  const hp = u.maxHealth > 0 ? healthOf(u) / u.maxHealth : 0
+                  const barW = HEX * 1.2
+                  return (
+                    <g key={u.id} className={`unit unit--${u.side}${state}`} transform={`translate(${x} ${y})`}>
+                      <circle className="unit-body" r={HEX * 0.6} />
+                      <text className="unit__tag" y={4}>
+                        {initials(u.name)}
+                      </text>
+                      {st !== 'dead' && (
+                        <>
+                          <rect className="unit__hp-bg" x={-barW / 2} y={-HEX * 0.9} width={barW} height={5} rx={2} />
+                          <rect className="unit__hp-fg" x={-barW / 2} y={-HEX * 0.9} width={barW * hp} height={5} rx={2} />
+                        </>
+                      )}
+                    </g>
+                  )
+                })}
+                {hitEvents.map((e, i) => {
+                  const targetId = e.kind === 'attack' ? e.targetId : e.unitId
+                  const target = frame.units.find((u) => u.id === targetId)
+                  if (!target) return null
+                  const { x, y } = hexToPixel(target.q, target.r)
+                  const cls =
+                    e.kind === 'attack'
+                      ? e.crit
+                        ? 'crit'
+                        : e.charge
+                          ? 'charge'
+                          : e.flank
+                            ? 'flank'
+                            : 'hit'
+                      : 'poison'
+                  return (
+                    <g key={`${frame.tick}-${i}`} className="fx" transform={`translate(${x} ${y})`}>
+                      <circle className={`fx__flash fx__flash--${cls}`} r={HEX * 0.72} />
+                      <text className={`fx__dmg fx__dmg--${cls}`} y={-HEX * 0.4}>
+                        −{e.amount}
+                      </text>
+                    </g>
+                  )
+                })}
+              </>
+            ) : (
+              [
+                  ...playerUnits.map((u) => {
+                    const pos = placement[u.instanceId]
+                    if (!pos) return null
+                    const { x, y } = hexToPixel(pos.q, pos.r)
+                    const isDragging = dragging === u.instanceId
+                    return (
+                      <g
+                        key={u.instanceId}
+                        className={`unit unit--player unit--draggable${isDragging ? ' unit--dragging' : ''}`}
+                        transform={`translate(${x} ${y})`}
+                        onPointerDown={(e) => onTokenDown(e, u.instanceId)}
+                      >
+                        <circle className="unit-body" r={HEX * 0.6} />
+                        <text className="unit__tag" y={4}>
+                          {initials(u.name)}
+                        </text>
+                      </g>
+                    )
+                  }),
+                  ...enemyPlacements.map((p, i) => {
+                    const { x, y } = hexToPixel(p.pos.q, p.pos.r)
+                    return (
+                      <g key={`enemy-${i}`} className="unit unit--enemy" transform={`translate(${x} ${y})`}>
+                        <circle className="unit-body" r={HEX * 0.6} />
+                        <text className="unit__tag" y={4}>
+                          {initials(p.sheet.name)}
+                        </text>
+                      </g>
+                    )
+                  }),
+                ]
+            )}
+
+            {ghost && dragging && (
+              <circle className="unit-body unit--player unit__ghost" r={HEX * 0.6} cx={ghost.x} cy={ghost.y} />
+            )}
+          </svg>
+
+          {phase === 'battle' && atEnd && trace && (
+            <div className={`result-banner result-banner--${trace.result.winner}`} role="status">
+              <strong>{winnerLabel}</strong>
+              <span className="hint">
+                {trace.result.ticks} ticks · survivors {survivors('player')} vs {survivors('enemy')}
+              </span>
+            </div>
+          )}
+          {phase === 'deploy' && (
+            <div className="result-banner" role="status">
+              <strong>Deploy</strong>
+              <span className="hint">
+                {canFight ? 'drag your units in the left zone, then Fight ▶' : 'both sides need at least one unit'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <aside className="skirmish__side">
+          {phase === 'deploy' ? (
+            <>
+              <PartyEditor
+                title="Your party"
+                party={playerParty}
+                max={maxParty}
+                onAdd={addTo(setPlayerParty)}
+                onRemove={removeFrom(setPlayerParty)}
+                onPreset={presetTo(setPlayerParty)}
+              />
+              <PartyEditor
+                title="Enemy party"
+                party={enemyParty}
+                max={maxParty}
+                onAdd={addTo(setEnemyParty)}
+                onRemove={removeFrom(setEnemyParty)}
+                onPreset={presetTo(setEnemyParty)}
+              />
+            </>
+          ) : (
+            <>
+              {(['player', 'enemy'] as const).map((side) => (
+                <div className="roster" key={side}>
+                  <h3>{side === 'player' ? 'Your party' : 'Enemy'}</h3>
+                  <ul>
+                    {frame &&
+                      frame.units
+                        .filter((u) => u.side === side)
+                        .map((u) => {
+                          const st = statusOf(u)
+                          return (
+                            <li key={u.id} className={st === 'dead' ? 'roster--dead' : st === 'down' ? 'roster--down' : ''}>
+                              {u.name}{' '}
+                              <span className="hint">
+                                {st === 'dead' ? 'dead' : st === 'down' ? 'down' : `${healthOf(u)}/${u.maxHealth}`}
+                              </span>
+                            </li>
+                          )
+                        })}
+                  </ul>
+                </div>
+              ))}
+              <div className="combat-log" aria-label="Combat log">
+                <h3>Combat log</h3>
+                <div className="combat-log__feed" ref={logRef}>
+                  {shownEvents.length === 0 ? (
+                    <div className="hint">deploy — no blows yet</div>
+                  ) : (
+                    shownEvents.map((e, i) => <LogLine key={i} e={e} />)
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
+      </main>
+
+      {phase === 'battle' && trace && (
+        <div className="transport">
+          <button
+            className="btn"
+            aria-label="Previous tick"
+            disabled={tick <= 0}
+            onClick={() => {
+              setPlaying(false)
+              setTick((t) => Math.max(0, t - 1))
+            }}
+          >
+            ⏮
+          </button>
+          <button className="btn" onClick={() => (atEnd ? (setTick(0), setPlaying(true)) : setPlaying((p) => !p))}>
+            {atEnd ? '↻ Replay' : playing ? '❚❚ Pause' : '▶ Play'}
+          </button>
+          <button
+            className="btn"
+            aria-label="Next tick"
+            disabled={tick >= trace.frames.length - 1}
+            onClick={() => {
+              setPlaying(false)
+              setTick((t) => Math.min(trace.frames.length - 1, t + 1))
+            }}
+          >
+            ⏭
+          </button>
+          <div className="speed-group" role="group" aria-label="Playback speed">
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                className={`btn${speed === s ? ' btn--active' : ''}`}
+                aria-pressed={speed === s}
+                onClick={() => setSpeed(s)}
+              >
+                {s}×
+              </button>
+            ))}
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={trace.frames.length - 1}
+            value={tick}
+            onChange={(e) => {
+              setPlaying(false)
+              setTick(Number(e.target.value))
+            }}
+          />
+          <span className="hint">
+            tick {frame?.tick ?? 0}/{trace.result.ticks}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}

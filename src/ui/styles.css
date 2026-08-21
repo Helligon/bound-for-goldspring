@@ -531,3 +531,462 @@ body {
   padding: 0.2rem 0.3rem;
   font: inherit;
 }
+
+/* --- Skirmish sim --- */
+.skirmish {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.skirmish .seed select {
+  margin-left: 0.4rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+}
+.skirmish__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.skirmish__field-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 0.75rem;
+}
+.skirmish-field {
+  width: 100%;
+  height: 100%;
+  background: #b8a77f;
+  border-radius: 8px;
+}
+
+.hex-cell {
+  fill: #d8c9a3;
+  stroke: #b3a279;
+  stroke-width: 1.5;
+}
+.hex-cell--player {
+  fill: #b9c6d6;
+}
+.hex-cell--enemy {
+  fill: #d9b7ab;
+}
+
+.unit-body {
+  stroke: #14110f;
+  stroke-width: 2.5;
+}
+.unit--player .unit-body {
+  fill: #4a90d9;
+}
+.unit--enemy .unit-body {
+  fill: #e33b2c;
+}
+.unit--down {
+  opacity: 0.4;
+}
+.unit--dead {
+  opacity: 0.16;
+}
+.unit__tag {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: bold;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: #14110f;
+  stroke-width: 3px;
+}
+.unit__hp-bg {
+  fill: #3a2f28;
+}
+.unit__hp-fg {
+  fill: #5ac36a;
+}
+
+.skirmish__side {
+  width: 240px;
+  border-left: 1px solid var(--line);
+  padding: 0.75rem;
+  overflow: auto;
+}
+.roster {
+  margin-bottom: 1rem;
+}
+.roster h3 {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+}
+.roster ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.roster li {
+  font-size: 0.8rem;
+}
+.roster--dead {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.roster--down {
+  opacity: 0.7;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+.transport input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.result-banner {
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.6rem 1.2rem;
+  background: rgba(30, 26, 23, 0.95);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  text-align: center;
+}
+.result-banner strong {
+  font-size: 1rem;
+  color: var(--accent);
+}
+.result-banner--enemy strong {
+  color: #e33b2c;
+}
+.result-banner--player strong {
+  color: #4a90d9;
+}
+
+.speed-group {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  border-color: var(--line);
+}
+
+/* Sidebar becomes a column: rosters up top, combat log flexes below. */
+.skirmish__side {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.combat-log {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5rem;
+}
+.combat-log h3 {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+}
+.combat-log__feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.log__line {
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+.log__line--death {
+  color: #e07a6a;
+}
+.log__line--down {
+  color: var(--accent);
+}
+.log__line--save {
+  color: #7fb0e0;
+}
+.log__tick {
+  color: var(--muted);
+  margin-right: 0.35rem;
+}
+.log__line strong {
+  color: var(--ink);
+}
+.badge {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  font-size: 0.64rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.badge--crit {
+  background: #e33b2c;
+  color: #fff;
+}
+.badge--charge {
+  background: var(--accent);
+  color: #14110f;
+}
+.badge--flank {
+  background: #4a90d9;
+  color: #fff;
+}
+
+/* Drag-to-place deployment. */
+.skirmish-field {
+  touch-action: none;
+}
+.unit--draggable {
+  cursor: grab;
+}
+.unit--draggable:active {
+  cursor: grabbing;
+}
+.unit--dragging {
+  opacity: 0.3;
+}
+.unit__ghost {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* The drag ghost is a single element (not nested in .unit--player), so give it a
+   direct fill rather than relying on the descendant rule. */
+.unit__ghost {
+  fill: #4a90d9;
+}
+
+/* Party builder (deploy phase). */
+.party-editor {
+  margin-bottom: 1rem;
+}
+.party-editor h3 {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+}
+.party-editor__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.party-editor__presets .btn {
+  font-size: 0.68rem;
+  padding: 0.15rem 0.35rem;
+}
+.party-editor__list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.party-editor__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.btn--x {
+  padding: 0 0.35rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.btn--x:hover {
+  color: #e33b2c;
+  border-color: #e33b2c;
+}
+.party-editor__add {
+  display: flex;
+  gap: 0.3rem;
+}
+.party-editor__add select {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.3rem;
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+/* Hit feedback overlay: a flash ring and a floating damage number per blow. */
+.fx {
+  pointer-events: none;
+}
+.fx__flash {
+  fill: none;
+  animation: fx-flash 0.4s ease-out forwards;
+}
+.fx__flash--hit {
+  stroke: #ffffff;
+}
+.fx__flash--crit {
+  stroke: #e33b2c;
+}
+.fx__flash--charge {
+  stroke: var(--accent);
+}
+.fx__flash--flank {
+  stroke: #4a90d9;
+}
+.fx__flash--poison {
+  stroke: #5ac36a;
+}
+@keyframes fx-flash {
+  from {
+    opacity: 0.9;
+    stroke-width: 8;
+  }
+  to {
+    opacity: 0;
+    stroke-width: 0;
+  }
+}
+
+/* The number floats up and holds visible, so it is readable when paused. */
+.fx__dmg {
+  text-anchor: middle;
+  font-weight: bold;
+  font-size: 18px;
+  paint-order: stroke;
+  stroke: #14110f;
+  stroke-width: 4px;
+  animation: fx-float 0.25s ease-out forwards;
+}
+.fx__dmg--hit {
+  fill: #ffffff;
+}
+.fx__dmg--crit {
+  fill: #ff6a5a;
+  font-size: 23px;
+}
+.fx__dmg--charge {
+  fill: var(--accent);
+}
+.fx__dmg--flank {
+  fill: #7fb0e0;
+}
+.fx__dmg--poison {
+  fill: #5ac36a;
+}
+@keyframes fx-float {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-6px);
+  }
+}
+
+/* Map-size control in the skirmish header. */
+.field-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.field-ctrl label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.field-ctrl input[type='number'] {
+  width: 3rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.field-ctrl select {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+/* Battlefield terrain themes: a palette per area, driven by CSS variables so the
+   deployment-zone tints (below) still win over the base hex fill. */
+.skirmish-field {
+  --field-bg: #b8a77f;
+  --hex-fill: #d8c9a3;
+  --hex-stroke: #b3a279;
+  background: var(--field-bg);
+}
+.theme-grass {
+  --field-bg: #4f6b39;
+  --hex-fill: #9fbf6a;
+  --hex-stroke: #7a9a4f;
+}
+.theme-ash {
+  --field-bg: #33302e;
+  --hex-fill: #6b6360;
+  --hex-stroke: #4a4441;
+}
+.theme-sand {
+  --field-bg: #b8975a;
+  --hex-fill: #e2c98c;
+  --hex-stroke: #c9a860;
+}
+.theme-jungle {
+  --field-bg: #254025;
+  --hex-fill: #4a6b3a;
+  --hex-stroke: #37502b;
+}
+.theme-streets {
+  --field-bg: #5f5a55;
+  --hex-fill: #a89f92;
+  --hex-stroke: #847b6f;
+}
+.hex-cell {
+  fill: var(--hex-fill);
+  stroke: var(--hex-stroke);
+}
+.hex-cell--player {
+  fill: #b9c6d6;
+}
+.hex-cell--enemy {
+  fill: #d9b7ab;
+}

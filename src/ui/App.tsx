@@ -157,6 +157,9 @@ export function App() {
     <div className="app">
       <header className="app__header">
         <h1>Bound for Goldspring</h1>
+        <a className="btn" href="#/skirmish">
+          Skirmish ▶
+        </a>
         <label className="seed">
           Seed:
           <input value={seed} onChange={(e) => setSeed(e.target.value)} />

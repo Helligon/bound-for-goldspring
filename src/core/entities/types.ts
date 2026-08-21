@@ -42,11 +42,11 @@ export type EnemyType =
 export type Capability = string
 
 /**
- * Origin of a weapon or piece of gear: one of the four nations, the shared
- * Neutral pool, or the Auldersmiths (a race whose smiths forge distinctive
- * blades).
+ * Origin of a combatant, weapon, or piece of gear: one of the four nations, the
+ * end capital Goldspring (cosmopolitan, no set of its own), the shared Neutral
+ * pool, or the Auldersmiths (a race whose smiths forge distinctive blades).
  */
-export type Affiliation = Faction | 'neutral' | 'auldersmiths'
+export type Affiliation = Faction | 'goldspring' | 'neutral' | 'auldersmiths'
 
 /** The battle core shared by every fighting body. Current health is runtime
  * battle state, not part of the template, so only the stat block sits here. */
@@ -67,12 +67,15 @@ export interface Trait {
 }
 
 /** An animal companion: has a stat block but no build pillars and no rank,
- * joined to the party via the Husbandry boon. */
+ * joined to the party via the Husbandry boon. Fights with a natural weapon
+ * (absent for non-combatants like the Mule); armour is its hide value. */
 export interface Companion {
   id: string
   name: string
   kind: 'companion'
   stats: Stats
+  naturalWeapon?: NaturalWeapon
+  armourValue: number
   capabilities: Capability[]
   upkeep: number
 }
@@ -93,10 +96,64 @@ export interface Item {
   kind: ItemKind
   type?: WeaponType
   faction?: Affiliation
+  /** Stat deltas conferred while equipped (weapons contribute `str`). */
   modifiers: StatModifiers
+  /** Weapons: attacks per exchange, set by weapon type. Absent for non-weapons.
+   * Melee adds this to SPD, ranged and thrown add it to DEX. */
+  rof?: number
+  /** Charge conferred while wielding, for braced polearms. Adds to the mount's. */
+  charge?: number
+  /** Armour items: damage mitigation value. */
+  armourValue?: number
   capabilities: Capability[]
   /** Gold price for shop buy/sell. */
   value: number
+}
+
+/** Human or animal; an animal fights with a natural weapon, not equipment. */
+export type Species = 'human' | 'animal'
+
+/** A beast's innate attack: no equipped weapon, its own rate of fire, and the
+ * stat that clocks it (`spd` for a bite or claw, `dex` for a ranged spit). */
+export interface NaturalWeapon {
+  name: string
+  rof: number
+  governed: 'spd' | 'dex'
+}
+
+/** A mount: a bonus package layered onto its rider, not a separate creature.
+ * While mounted the rider gains the health bonus and charge and moves at the
+ * mount's speed; there is no separate mount health and no dismounting. */
+export interface Mount {
+  id: string
+  name: string
+  kind: 'mount'
+  tier: 'standard' | 'legendary'
+  affiliation: Affiliation
+  grants: { healthBonus: number; charge: number; spd: number }
+  capabilities: Capability[]
+  upkeep: number
+  value: number
+}
+
+/** An authored combatant template, mirroring a vault stat sheet. The combat
+ * engine instantiates it into a runtime battle unit; health is derived from
+ * `stats.str` (halved for a mook). Humans carry a `weapon` (and `secondary`
+ * fallback); animals carry a `naturalWeapon` instead. */
+export interface CombatantSheet extends Combatant {
+  id: string
+  name: string
+  kind: 'combatant'
+  species: Species
+  affiliation: Affiliation
+  weapon?: string
+  secondary?: string | null
+  naturalWeapon?: NaturalWeapon
+  /** Worn-armour mitigation. */
+  armourValue: number
+  /** Mount id, or null. */
+  mount: string | null
+  capabilities: Capability[]
 }
 
 /** A member of the Captain's party. Heroes are named and carry a build; mooks

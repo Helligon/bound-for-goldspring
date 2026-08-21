@@ -1,32 +1,37 @@
-// The shared combatant stat block and the one rule every entity depends on:
-// an effective stat is its base plus the sum of every modifier applied to it
-// (from equipment, traits, build pillars). Pure and integer-only, like the rest
-// of the core.
+// The three primary attributes every fighting body is built from, and the two
+// rules that depend only on them: modifier composition and derived health. Pure
+// and integer-only, like the rest of the core.
+//
+// STR drives damage, health, and carry weight. SPD drives move speed and the
+// melee attack rate (SPD + weapon RoF). DEX drives crit chance and the ranged
+// and thrown attack rate (DEX + weapon RoF). Armour is an equipment value,
+// charge is unit state fed by mounts and braced weapons, and sight is a
+// map-layer concern; none of them live on this block.
 
-/** The battle-relevant stats shared by party members, enemies, and companions. */
+/** The three primary attributes shared by party members, enemies, and beasts. */
 export interface Stats {
-  strength: number
-  armour: number
-  attackSpeed: number
-  charge: number
-  sight: number
-  maxHealth: number
+  str: number
+  spd: number
+  dex: number
 }
 
 /** A partial stat delta, as carried by items, traits, and pillar templates. */
 export type StatModifiers = Partial<Stats>
 
 /** A stat block with every value at zero. */
-export const ZERO_STATS: Stats = {
-  strength: 0,
-  armour: 0,
-  attackSpeed: 0,
-  charge: 0,
-  sight: 0,
-  maxHealth: 0,
-}
+export const ZERO_STATS: Stats = { str: 0, spd: 0, dex: 0 }
 
 const STAT_KEYS = Object.keys(ZERO_STATS) as (keyof Stats)[]
+
+/** Health is derived from strength, not stored: HEALTH_BASE + STR * HEALTH_PER_STR.
+ * Placeholder tuning; a mook takes roughly half this in the combat engine. */
+export const HEALTH_BASE = 6
+export const HEALTH_PER_STR = 3
+
+/** Derived maximum health for a body of the given strength. */
+export function maxHealthFor(str: number): number {
+  return HEALTH_BASE + str * HEALTH_PER_STR
+}
 
 /**
  * Effective stats = base plus the sum of every modifier. Absent modifier keys

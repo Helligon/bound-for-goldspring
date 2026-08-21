@@ -24,8 +24,39 @@ export { actionsFor, canResolve, resolveAction } from './game/encounters'
 export type { EncounterAction, EncounterActionId } from './game/encounters'
 export { travelStep } from './game/run'
 export type { StepResult } from './game/run'
-export { applyModifiers, ZERO_STATS } from './entities/stats'
+export { applyModifiers, maxHealthFor, ZERO_STATS, HEALTH_BASE, HEALTH_PER_STR } from './entities/stats'
 export type { Stats, StatModifiers } from './entities/stats'
+export {
+  WEAPONS,
+  MOUNTS,
+  COMBATANTS,
+  weaponById,
+  mountById,
+  combatantById,
+  resolveBattle,
+  traceBattle,
+  DEFAULT_FIELD,
+  allHexes,
+  hexDistance,
+  hexEquals,
+  hexKey,
+  inBounds,
+} from './combat'
+export type {
+  Field,
+  Hex,
+  AttackProfile,
+  BattleResult,
+  BattleSetup,
+  BattleFrame,
+  BattleTrace,
+  CombatEvent,
+  FrameUnit,
+  Placement,
+  Side,
+  Unit,
+  UnitOutcome,
+} from './combat'
 export type {
   Rank,
   WeaponType,
@@ -34,6 +65,10 @@ export type {
   EnemyType,
   Capability,
   Affiliation,
+  Species,
+  NaturalWeapon,
+  Mount,
+  CombatantSheet,
   Combatant,
   Trait,
   Companion,
