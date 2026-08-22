@@ -10,7 +10,7 @@
 // save after the battle (threshold = timesDowned + 1).
 
 import type { Rng } from '../rng'
-import { hexDistance, hexEquals, hexKey } from './hex'
+import { canCross, enterCost, hexDistance, hexEquals, hexKey } from './hex'
 import {
   ACTION_THRESHOLD,
   CHARGE_DAMAGE_PER_HEX,
@@ -146,19 +146,26 @@ function act(
     const target = chooseTarget(u, units)
     if (!target) continue
     const dist = hexDistance(u.pos, target.pos)
-    if (dist <= u.attack.range) {
+    // Melee can only strike across a passable border; ranged shoots over one.
+    const canHit =
+      dist <= u.attack.range && (u.attack.range > MELEE_RANGE || canCross(field, u.pos, target.pos))
+    if (canHit) {
       if (u.attackMeter >= ACTION_THRESHOLD) {
         u.attackMeter -= ACTION_THRESHOLD
         resolveAttack(u, target, units, occupied, rng, emit, tick)
       }
     } else if (u.moveMeter >= ACTION_THRESHOLD) {
-      u.moveMeter -= ACTION_THRESHOLD
       const dest = stepToward(u, target.pos, occupied, field)
       if (!hexEquals(dest, u.pos)) {
-        occupied.delete(hexKey(u.pos))
-        u.pos = dest
-        occupied.add(hexKey(dest))
-        u.hexesMoved += 1
+        const cost = enterCost(field, dest) * ACTION_THRESHOLD
+        if (u.moveMeter >= cost) {
+          u.moveMeter -= cost
+          occupied.delete(hexKey(u.pos))
+          u.pos = dest
+          occupied.add(hexKey(dest))
+          u.hexesMoved += 1
+        }
+        // else: not enough to enter slow terrain yet; keep accruing.
       }
     }
   }

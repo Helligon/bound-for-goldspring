@@ -990,3 +990,93 @@ body {
 .hex-cell--enemy {
   fill: #d9b7ab;
 }
+
+/* Terrain hexes: obstacles (removed from play) and the river's playable crossings.
+   Placed after .hex-cell so they win the fill. */
+.hex-terrain--water {
+  fill: #3a6b9a;
+  stroke: #2f5580;
+}
+.hex-terrain--rock {
+  fill: #514a45;
+  stroke: #39332f;
+}
+.hex-terrain--tree {
+  fill: #2e4a2a;
+  stroke: #20351d;
+}
+.hex-terrain--building {
+  fill: #7a7066;
+  stroke: #564e46;
+}
+/* Crossings stay playable, so they read as passable terrain. */
+.hex-terrain--bridge {
+  fill: #8a6a44;
+  stroke: #634a2f;
+}
+.hex-terrain--ford {
+  fill: #6fa0c0;
+  stroke: #4f7f9f;
+}
+
+/* Impassable border: a thick line on the shared hex edge. */
+.edge-blocked {
+  stroke: #2f6f9f;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+/* Terrain modal. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  max-width: 460px;
+  width: calc(100% - 2rem);
+}
+.modal h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+}
+.modal__list {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.modal__list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.swatch {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  margin-top: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+.swatch--edge {
+  background: #2f6f9f;
+}
+.swatch--slow {
+  background: #514a45;
+}
+.modal .btn {
+  margin-top: 0.4rem;
+}

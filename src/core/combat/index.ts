@@ -9,6 +9,9 @@ export { stepToward } from './movement'
 export { DEFAULT_FIELD } from './constants'
 export {
   allHexes,
+  canCross,
+  edgeKey,
+  enterCost,
   hexDistance,
   hexEquals,
   hexKey,

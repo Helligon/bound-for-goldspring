@@ -3,7 +3,7 @@ import { combatantById } from './data'
 import { instantiate } from './unit'
 import { stepToward } from './movement'
 import { DEFAULT_FIELD } from './constants'
-import { hexDistance, hexKey, type Hex } from './hex'
+import { canCross, edgeKey, hexDistance, hexKey, neighboursInField, type Field, type Hex } from './hex'
 import type { Unit } from './types'
 
 function mk(q: number, r: number): Unit {
@@ -16,39 +16,39 @@ describe('stepToward', () => {
   it('moves one hex and ends up closer to the target', () => {
     const u = mk(0, 2)
     const target: Hex = { q: 6, r: 2 }
-    const next = stepToward(u, target, new Set(), field)
+    const next = stepToward(u, target, new Set([hexKey(target)]), field)
     expect(hexDistance(next, u.pos)).toBe(1)
     expect(hexDistance(next, target)).toBeLessThan(hexDistance(u.pos, target))
   })
 
-  it('holds position when every closer hex is occupied (body-blocking)', () => {
-    const u = mk(0, 2)
-    const target: Hex = { q: 6, r: 2 }
-    // Occupy all in-field neighbours that would be strictly closer.
-    const occupied = new Set<string>()
-    for (const d of [
-      { q: 1, r: 2 },
-      { q: 1, r: 1 },
-    ]) {
-      occupied.add(hexKey(d))
-    }
-    const next = stepToward(u, target, occupied, field)
-    expect(hexKey(next)).toBe(hexKey(u.pos))
+  it('routes around a blocked edge instead of crossing it', () => {
+    const a: Hex = { q: 2, r: 2 }
+    const target: Hex = { q: 3, r: 2 } // adjacent, but the border is blocked
+    const walled: Field = { ...field, blockedEdges: new Set([edgeKey(a, target)]) }
+    const u = mk(2, 2)
+    const next = stepToward(u, target, new Set([hexKey(target)]), walled)
+    expect(hexKey(next)).not.toBe(hexKey(u.pos)) // it moves
+    expect(hexKey(next)).not.toBe(hexKey(target)) // not across the blocked edge
+    expect(canCross(walled, u.pos, next)).toBe(true) // via a passable border
   })
 
-  it('holds when already adjacent to the target (whose hex is occupied)', () => {
+  it('holds when fully enclosed by bodies', () => {
+    const u = mk(3, 3)
+    const occupied = new Set<string>([hexKey({ q: 7, r: 3 })])
+    for (const n of neighboursInField(field, u.pos)) occupied.add(hexKey(n))
+    expect(hexKey(stepToward(u, { q: 7, r: 3 }, occupied, field))).toBe(hexKey(u.pos))
+  })
+
+  it('holds when adjacent to the target (whose hex is occupied)', () => {
     const u = mk(3, 2)
     const target: Hex = { q: 4, r: 2 }
-    // The target stands on its hex, so the unit cannot step onto it.
-    const occupied = new Set<string>([hexKey(target)])
-    expect(hexKey(stepToward(u, target, occupied, field))).toBe(hexKey(u.pos))
+    expect(hexKey(stepToward(u, target, new Set([hexKey(target)]), field))).toBe(hexKey(u.pos))
   })
 
   it('is deterministic across repeated calls', () => {
     const u = mk(0, 0)
     const target: Hex = { q: 5, r: 3 }
-    const a = stepToward(u, target, new Set(), field)
-    const b = stepToward(u, target, new Set(), field)
-    expect(hexKey(a)).toBe(hexKey(b))
+    const occ = new Set([hexKey(target)])
+    expect(hexKey(stepToward(u, target, occ, field))).toBe(hexKey(stepToward(u, target, occ, field)))
   })
 })

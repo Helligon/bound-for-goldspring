@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   allHexes,
+  canCross,
+  edgeKey,
   hexDistance,
   hexEquals,
   hexKey,
@@ -72,13 +74,16 @@ describe('hex geometry', () => {
       for (const hex of all) expect(inBounds(field, hex)).toBe(true)
     })
 
-    it('removes holes from the field', () => {
-      const holes = new Set([hexKey(h(2, 1)), hexKey(h(5, 3))])
-      const holed: Field = { width: 8, height: 6, holes }
-      expect(allHexes(holed).length).toBe(8 * 6 - 2)
-      expect(inBounds(holed, h(2, 1))).toBe(false)
-      expect(inBounds(holed, h(5, 3))).toBe(false)
-      expect(inBounds(holed, h(3, 3))).toBe(true)
+    it('blocks movement across a blocked edge but keeps both hexes in play', () => {
+      const a = h(2, 2)
+      const b = h(3, 2)
+      const f: Field = { width: 8, height: 6, blockedEdges: new Set([edgeKey(a, b)]) }
+      expect(allHexes(f).length).toBe(8 * 6) // no hexes removed
+      expect(inBounds(f, a)).toBe(true)
+      expect(inBounds(f, b)).toBe(true)
+      expect(canCross(f, a, b)).toBe(false)
+      expect(canCross(f, b, a)).toBe(false) // undirected
+      expect(canCross(f, a, h(2, 3))).toBe(true)
     })
 
     it('clips neighbours at the edge of the field', () => {

@@ -9,13 +9,15 @@ export interface Hex {
   r: number
 }
 
-/** A bounded battlefield, `width` hexes across and `height` deep. `holes`, if
- * given, are hexes removed from the box (water, obstacles), keyed by hexKey, so
- * rivers and terrain all use one mechanism. */
+/** A bounded battlefield, `width` hexes across and `height` deep. Terrain lives on
+ * edges and hexes, not by removing hexes: `blockedEdges` are borders units cannot
+ * move across (rivers, walls), keyed by `edgeKey`; `slow` hexes cost double to
+ * move into (rough ground), keyed by `hexKey`. */
 export interface Field {
   width: number
   height: number
-  holes?: ReadonlySet<string>
+  blockedEdges?: ReadonlySet<string>
+  slow?: ReadonlySet<string>
 }
 
 /** A stable string key for use in sets and maps. */
@@ -48,10 +50,26 @@ export function neighbours(h: Hex): Hex[] {
   return DIRECTIONS.map((d) => ({ q: h.q + d.q, r: h.r + d.r }))
 }
 
-/** True when `h` lies within the field box and is not a removed hole. */
+/** True when `h` lies within the field box. */
 export function inBounds(field: Field, h: Hex): boolean {
-  if (h.q < 0 || h.q >= field.width || h.r < 0 || h.r >= field.height) return false
-  return !field.holes?.has(hexKey(h))
+  return h.q >= 0 && h.q < field.width && h.r >= 0 && h.r < field.height
+}
+
+/** Stable, direction-independent key for the border between two adjacent hexes. */
+export function edgeKey(a: Hex, b: Hex): string {
+  const ka = hexKey(a)
+  const kb = hexKey(b)
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`
+}
+
+/** True when a unit may move across the border between adjacent `a` and `b`. */
+export function canCross(field: Field, a: Hex, b: Hex): boolean {
+  return !field.blockedEdges?.has(edgeKey(a, b))
+}
+
+/** Move cost to enter `h`: double on slow terrain, otherwise one. */
+export function enterCost(field: Field, h: Hex): number {
+  return field.slow?.has(hexKey(h)) ? 2 : 1
 }
 
 /** Every hex of the field, each exactly once. */

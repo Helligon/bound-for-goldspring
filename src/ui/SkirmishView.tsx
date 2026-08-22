@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { allHexes, combatantById, COMBATANTS, inBounds, traceBattle, Rng } from '../core'
+import { allHexes, combatantById, COMBATANTS, hexKey, inBounds, traceBattle, Rng } from '../core'
+import { edgeKey } from '../core/combat'
 import type { BattleSetup, CombatEvent, Field, FrameUnit, Hex, Placement, Side } from '../core'
 
 // Events that land damage this tick, drawn as floating numbers over the field.
@@ -46,19 +47,23 @@ const MAX_DEPLOY_COLS = 3 // deployment-zone depth per side, clamped to field wi
 // fields; structural battlefields (River Crossing) come in a later pass.
 type Size = 'small' | 'medium' | 'large'
 type Theme = 'grass' | 'ash' | 'sand' | 'jungle' | 'streets'
+type Terrain = 'field' | 'rockfield' | 'jungle' | 'streets' | 'river'
+type TerrainKind = 'rock' | 'tree' | 'building' | 'water' | 'bridge' | 'ford'
 interface Battlefield {
   id: string
   label: string
   size: Size
   theme: Theme
+  terrain: Terrain
 }
 
 const BATTLEFIELDS: Battlefield[] = [
-  { id: 'great-fields', label: 'Great Fields', size: 'large', theme: 'grass' },
-  { id: 'ashfall', label: 'Ashfall', size: 'large', theme: 'ash' },
-  { id: 'gold-sea', label: 'The Gold Sea', size: 'large', theme: 'sand' },
-  { id: 'ironwood', label: 'Ironwood Forest', size: 'medium', theme: 'jungle' },
-  { id: 'goldspring', label: 'Goldspring', size: 'medium', theme: 'streets' },
+  { id: 'great-fields', label: 'Great Fields', size: 'large', theme: 'grass', terrain: 'field' },
+  { id: 'ashfall', label: 'Ashfall', size: 'large', theme: 'ash', terrain: 'rockfield' },
+  { id: 'gold-sea', label: 'The Gold Sea', size: 'large', theme: 'sand', terrain: 'field' },
+  { id: 'ironwood', label: 'Ironwood Forest', size: 'medium', theme: 'jungle', terrain: 'jungle' },
+  { id: 'goldspring', label: 'Goldspring', size: 'medium', theme: 'streets', terrain: 'streets' },
+  { id: 'river-crossing', label: 'River Crossing', size: 'medium', theme: 'grass', terrain: 'river' },
 ]
 
 const SIZE_DIMS: Record<Size, { width: number; height: number }> = {
@@ -70,6 +75,59 @@ const SIZE_DIMS: Record<Size, { width: number; height: number }> = {
 /** The battlefield for a seed: reproducible, so the same seed replays it. */
 function battlefieldForSeed(seed: string): Battlefield {
   return BATTLEFIELDS[new Rng(`field:${seed}`).int(0, BATTLEFIELDS.length - 1)]
+}
+
+/**
+ * The terrain for a battlefield: `holes` are impassable hexes (removed from the
+ * field), `kinds` styles every terrain hex (including the river's playable bridge
+ * and ford). Obstacles sit only in the middle band, so both deployment zones stay
+ * clear. Deterministic from the seed.
+ */
+function generateTerrain(
+  terrain: Terrain,
+  width: number,
+  height: number,
+  cols: number,
+  rng: Rng,
+): { blockedEdges: Set<string>; slow: Set<string>; kinds: Map<string, TerrainKind> } {
+  const blockedEdges = new Set<string>()
+  const slow = new Set<string>()
+  const kinds = new Map<string, TerrainKind>()
+  const key = (q: number, r: number) => `${q},${r}`
+
+  if (terrain === 'field') return { blockedEdges, slow, kinds }
+
+  if (terrain === 'river') {
+    // An impassable river down the boundary between two centre columns, save a
+    // bridge and a ford where units may cross.
+    const c = Math.floor(width / 2) - 1
+    const crossings = [Math.floor(height / 3), Math.floor((2 * height) / 3)]
+    for (let r = 0; r < height; r++) {
+      for (const b of [{ q: c + 1, r }, { q: c + 1, r: r - 1 }]) {
+        if (b.r >= 0 && b.r < height) blockedEdges.add(edgeKey({ q: c, r }, b))
+      }
+    }
+    crossings.forEach((r, i) => {
+      blockedEdges.delete(edgeKey({ q: c, r }, { q: c + 1, r })) // open the crossing
+      const kind: TerrainKind = i === 0 ? 'bridge' : 'ford'
+      kinds.set(key(c, r), kind)
+      kinds.set(key(c + 1, r), kind)
+    })
+    return { blockedEdges, slow, kinds }
+  }
+
+  // Rough, slow ground scattered in the middle band (deployment zones stay clear).
+  const kind: TerrainKind = terrain === 'rockfield' ? 'rock' : terrain === 'jungle' ? 'tree' : 'building'
+  const density = terrain === 'streets' ? 0.3 : terrain === 'jungle' ? 0.28 : 0.22
+  for (let q = cols; q < width - cols; q++) {
+    for (let r = 0; r < height; r++) {
+      if (rng.chance(density)) {
+        slow.add(key(q, r))
+        kinds.set(key(q, r), kind)
+      }
+    }
+  }
+  return { blockedEdges, slow, kinds }
 }
 
 const INITIAL_FIELD: Field = { ...SIZE_DIMS[battlefieldForSeed('skirmish-1').size] }
@@ -264,6 +322,7 @@ export function SkirmishView() {
   const [speed, setSpeed] = useState(1)
   const [dragging, setDragging] = useState<string | null>(null)
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
+  const [showTerrain, setShowTerrain] = useState(false)
 
   const svgRef = useRef<SVGSVGElement>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -280,44 +339,76 @@ export function SkirmishView() {
   }, [activeBattlefield.id])
 
   const playerUnits = useMemo(() => partyToUnits(playerParty), [playerParty])
-  const hexes = useMemo(() => allHexes(field), [field])
   const deployCols = useMemo(() => deployColsFor(field), [field])
+  // Terrain (obstacles/water) for the active battlefield, and the field with those
+  // hexes removed as holes. Geometry runs on `battleField`; rendering also draws
+  // the terrain hexes (via `boxHexes`), which are removed from play.
+  const terrain = useMemo(
+    () =>
+      generateTerrain(
+        activeBattlefield.terrain,
+        field.width,
+        field.height,
+        deployCols,
+        new Rng(`terrain:${seed}:${activeBattlefield.id}`),
+      ),
+    [activeBattlefield.terrain, activeBattlefield.id, field.width, field.height, deployCols, seed],
+  )
+  const battleField: Field = useMemo(
+    () => ({
+      width: field.width,
+      height: field.height,
+      blockedEdges: terrain.blockedEdges,
+      slow: terrain.slow,
+    }),
+    [field.width, field.height, terrain],
+  )
+  const hexes = useMemo(() => allHexes(battleField), [battleField])
+  const boxHexes = useMemo(() => {
+    const out: Hex[] = []
+    for (let q = 0; q < field.width; q++) for (let r = 0; r < field.height; r++) out.push({ q, r })
+    return out
+  }, [field.width, field.height])
   const maxParty = useMemo(
     () =>
       Math.max(
         1,
-        Math.min(field.height, zoneCells(field, 'player', deployCols).length, zoneCells(field, 'enemy', deployCols).length),
+        Math.min(
+          field.height,
+          zoneCells(battleField, 'player', deployCols).length,
+          zoneCells(battleField, 'enemy', deployCols).length,
+        ),
       ),
-    [field, deployCols],
+    [battleField, field.height, deployCols],
   )
 
   // Editing the player party (or the field) resets the layout and returns to
   // deploy; editing the enemy party just returns to deploy.
   useEffect(() => {
-    setPlacement(defaultPlacement(playerUnits, field, deployCols))
+    setPlacement(defaultPlacement(playerUnits, battleField, deployCols))
     setPhase('deploy')
     setTick(0)
-  }, [playerUnits, field, deployCols])
+  }, [playerUnits, battleField, deployCols])
   useEffect(() => {
     setPhase('deploy')
     setTick(0)
   }, [enemyParty])
 
   const enemyPlacements = useMemo(
-    () => fillZone(enemyParty, field, 'enemy', deployCols),
-    [enemyParty, field, deployCols],
+    () => fillZone(enemyParty, battleField, 'enemy', deployCols),
+    [enemyParty, battleField, deployCols],
   )
 
   const setup: BattleSetup = useMemo(
     () => ({
-      field,
+      field: battleField,
       player: playerUnits.map((u) => ({
         sheet: combatantById(u.sheetId)!,
         pos: placement[u.instanceId] ?? { q: 0, r: 0 },
       })),
       enemy: enemyPlacements,
     }),
-    [playerUnits, placement, enemyPlacements, field],
+    [playerUnits, placement, enemyPlacements, battleField],
   )
 
   const trace = useMemo(
@@ -411,7 +502,7 @@ export function SkirmishView() {
     if (!dragging) return
     const p = toSvg(e.clientX, e.clientY)
     const h = hexAt(p.x, p.y)
-    if (h && inBounds(field, h) && h.q < deployCols) {
+    if (h && inBounds(battleField, h) && h.q < deployCols) {
       setPlacement((prev) => {
         const next = { ...prev }
         const occupant = Object.keys(next).find((k) => k !== dragging && next[k].q === h.q && next[k].r === h.r)
@@ -429,8 +520,8 @@ export function SkirmishView() {
     setGhost(null)
   }
 
-  // Viewbox framed to all hex centres, padded by a hex.
-  const centres = hexes.map((h) => hexToPixel(h.q, h.r))
+  // Viewbox framed to the whole box (terrain included), padded by a hex.
+  const centres = boxHexes.map((h) => hexToPixel(h.q, h.r))
   const xs = centres.map((c) => c.x)
   const ys = centres.map((c) => c.y)
   const minX = Math.min(...xs) - HEX * 1.3
@@ -503,6 +594,9 @@ export function SkirmishView() {
             {activeBattlefield.label} · {hexes.length} hexes
           </span>
         </div>
+        <button className="btn" onClick={() => setShowTerrain(true)}>
+          Terrain ⓘ
+        </button>
         {phase === 'deploy' ? (
           <button className="btn btn--active" disabled={!canFight} onClick={() => setPhase('battle')}>
             Fight ▶
@@ -526,9 +620,39 @@ export function SkirmishView() {
             onPointerMove={onSvgMove}
             onPointerUp={onSvgUp}
           >
-            {hexes.map((h) => {
+            {boxHexes.map((h) => {
               const { x, y } = hexToPixel(h.q, h.r)
-              return <polygon key={`${h.q},${h.r}`} className={`hex-cell${zoneClass(h.q)}`} points={hexCorners(x, y)} />
+              const k = hexKey(h)
+              const kind = terrain.kinds.get(k)
+              const cls = `hex-cell${zoneClass(h.q)}${kind ? ` hex-terrain--${kind}` : ''}`
+              return <polygon key={k} className={cls} points={hexCorners(x, y)} />
+            })}
+
+            {/* Impassable borders (rivers, walls): a thick line on the shared edge. */}
+            {[...terrain.blockedEdges].map((ek) => {
+              const [ka, kb] = ek.split('|')
+              const [aq, ar] = ka.split(',').map(Number)
+              const [bq, br] = kb.split(',').map(Number)
+              const a = hexToPixel(aq, ar)
+              const b = hexToPixel(bq, br)
+              const mx = (a.x + b.x) / 2
+              const my = (a.y + b.y) / 2
+              const dx = b.x - a.x
+              const dy = b.y - a.y
+              const len = Math.hypot(dx, dy) || 1
+              const nx = -dy / len
+              const ny = dx / len
+              const half = HEX / 2
+              return (
+                <line
+                  key={ek}
+                  className="edge-blocked"
+                  x1={(mx + nx * half).toFixed(2)}
+                  y1={(my + ny * half).toFixed(2)}
+                  x2={(mx - nx * half).toFixed(2)}
+                  y2={(my - ny * half).toFixed(2)}
+                />
+              )
             })}
 
             {phase === 'battle' && frame ? (
@@ -747,6 +871,37 @@ export function SkirmishView() {
           <span className="hint">
             tick {frame?.tick ?? 0}/{trace.result.ticks}
           </span>
+        </div>
+      )}
+
+      {showTerrain && (
+        <div className="modal-backdrop" onClick={() => setShowTerrain(false)}>
+          <div className="modal" role="dialog" aria-label="Terrain" onClick={(e) => e.stopPropagation()}>
+            <h2>Terrain</h2>
+            <ul className="modal__list">
+              <li>
+                <span className="swatch swatch--edge" />
+                <span>
+                  <strong>Impassable border</strong> — a thick line (a river or wall) units cannot cross.
+                  Cross only at a gap: a <em>bridge</em> or a <em>ford</em>. Ranged attacks still fire over it.
+                </span>
+              </li>
+              <li>
+                <span className="swatch swatch--slow" />
+                <span>
+                  <strong>Rough ground</strong> — rock, jungle or streets. Costs double to move into
+                  (half movement speed).
+                </span>
+              </li>
+            </ul>
+            <p className="hint">
+              Great Fields and The Gold Sea are open. Ashfall, Ironwood Forest and Goldspring are rough.
+              River Crossing is split by a river with a bridge and a ford.
+            </p>
+            <button className="btn" onClick={() => setShowTerrain(false)}>
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

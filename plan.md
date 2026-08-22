@@ -171,10 +171,17 @@ a terrain theme (a CSS-variable palette now, the hook for terrain modifiers late
 The sim picks one per seed (reproducible) with a header override; selecting one sets
 the field size, and W/H stay tweakable.
 
-Next battlefield increments (from new-features.md, deferred by choice): River
-Crossing (water band + bridge/ford) and scattered terrain obstacles — both need BFS
-movement (via `holes`) so units path around chokepoints, which also fixes the greedy
-"boxed-in" stall.
+Terrain battlefields DONE. Movement is BFS (distance field from the target over
+passable hexes) so units route around barriers/bodies (fixes greedy "boxed-in"
+stall). Terrain is edge- and hex-based, not hole-based: `Field` carries
+`blockedEdges` (impassable borders, via `edgeKey`/`canCross`) and `slow` hexes
+(double move cost, via `enterCost`). Melee cannot strike across a blocked border
+(ranged fires over); entering slow terrain needs 2x the move meter (half speed).
+`SkirmishView.generateTerrain`: rockfield/jungle/streets scatter **slow** hexes in
+the middle band; **River Crossing** blocks the centre-boundary edges save a bridge
+and a ford. Rendering draws slow hexes tinted and blocked edges as thick lines; a
+**Terrain modal** (header button) explains both. Verified: river fights cross at
+the gaps, slow fights resolve. 144 tests.
 
 5. **Balance pass.** With outcomes legible, tune `constants.ts` and the stat sheets
    against feel; a matchup-matrix script to catch dominant units. Keep vault↔code
