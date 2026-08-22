@@ -10,6 +10,7 @@ export { DEFAULT_FIELD } from './constants'
 export {
   allHexes,
   canCross,
+  capBlockedEdges,
   edgeKey,
   enterCost,
   hexDistance,

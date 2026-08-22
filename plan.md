@@ -160,7 +160,9 @@ from strict TDD, but the engine additions (the event log) are test-first.
    number holds visible so it is readable when paused; the flash is a transient
    during play. UI-only; build + 142 tests green; verified in-browser.
 Extra sim controls added along the way (not numbered steps): playback speed (1×/2×)
-and step-by-tick buttons; a map-size control (width/height + live hex count); and an
+and step-by-tick buttons; the field size now scales with the larger party (`fieldFor`:
+height = partySize+1, width += area size class; manual W/H retired, party cap 8); a
+crown marker on hero tokens; and an
 area-battlefield system (replaced the earlier abstract ball/bell/boot/bone shapes,
 which read as arbitrary). `Field` carries an optional `holes` set (removed hexes)
 in `hex.ts` — the general mechanism for water and, later, obstacles (unused so far;

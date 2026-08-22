@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   allHexes,
   canCross,
+  capBlockedEdges,
   edgeKey,
   hexDistance,
   hexEquals,
@@ -72,6 +73,21 @@ describe('hex geometry', () => {
       expect(all).toHaveLength(8 * 6)
       expect(new Set(all.map(hexKey)).size).toBe(8 * 6)
       for (const hex of all) expect(inBounds(field, hex)).toBe(true)
+    })
+
+    it('caps blocked edges so no hex exceeds the limit (max 3)', () => {
+      const centre = h(2, 2)
+      // Offer all six of the centre hex's borders as candidates.
+      const candidates = neighbours(centre).map((n) => edgeKey(centre, n))
+      const kept = capBlockedEdges(candidates, 3)
+      expect(kept.size).toBe(3) // only three of the six survive
+      const key = hexKey(centre)
+      let touching = 0
+      for (const ek of kept) {
+        const [a, b] = ek.split('|')
+        if (a === key || b === key) touching++
+      }
+      expect(touching).toBe(3)
     })
 
     it('blocks movement across a blocked edge but keeps both hexes in play', () => {

@@ -1021,8 +1021,8 @@ body {
 
 /* Impassable border: a thick line on the shared hex edge. */
 .edge-blocked {
-  stroke: #2f6f9f;
-  stroke-width: 7;
+  stroke: #111111;
+  stroke-width: 5;
   stroke-linecap: round;
 }
 
@@ -1079,4 +1079,28 @@ body {
 }
 .modal .btn {
   margin-top: 0.4rem;
+}
+
+/* Crown above hero tokens. */
+.unit__crown {
+  fill: #e8c86a;
+  stroke: #5a4418;
+  stroke-width: 1;
+}
+
+/* Hexagon swatches in the terrain modal (reuse the map's terrain classes). */
+.swatch-hex {
+  flex: 0 0 auto;
+}
+
+.modal__subhead {
+  font-size: 0.85rem;
+  margin: 0.7rem 0 0.4rem;
+}
+.modal__edge {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }

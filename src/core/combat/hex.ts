@@ -67,6 +67,25 @@ export function canCross(field: Field, a: Hex, b: Hex): boolean {
   return !field.blockedEdges?.has(edgeKey(a, b))
 }
 
+/** Greedily keep as many candidate blocked edges (edgeKeys) as possible without
+ * any hex ending up with more than `maxPerHex` of them, so no hex is walled in on
+ * most of its sides. Deterministic in input order. */
+export function capBlockedEdges(candidates: Iterable<string>, maxPerHex = 3): Set<string> {
+  const kept = new Set<string>()
+  const count = new Map<string, number>()
+  for (const ek of candidates) {
+    if (kept.has(ek)) continue // ignore duplicate candidates
+    const bar = ek.indexOf('|')
+    const ka = ek.slice(0, bar)
+    const kb = ek.slice(bar + 1)
+    if ((count.get(ka) ?? 0) >= maxPerHex || (count.get(kb) ?? 0) >= maxPerHex) continue
+    kept.add(ek)
+    count.set(ka, (count.get(ka) ?? 0) + 1)
+    count.set(kb, (count.get(kb) ?? 0) + 1)
+  }
+  return kept
+}
+
 /** Move cost to enter `h`: double on slow terrain, otherwise one. */
 export function enterCost(field: Field, h: Hex): number {
   return field.slow?.has(hexKey(h)) ? 2 : 1

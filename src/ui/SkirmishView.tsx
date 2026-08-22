@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { allHexes, combatantById, COMBATANTS, hexKey, inBounds, traceBattle, Rng } from '../core'
-import { edgeKey } from '../core/combat'
+import { capBlockedEdges, edgeKey, neighboursInField } from '../core/combat'
 import type { BattleSetup, CombatEvent, Field, FrameUnit, Hex, Placement, Side } from '../core'
 
 // Events that land damage this tick, drawn as floating numbers over the field.
@@ -66,12 +66,6 @@ const BATTLEFIELDS: Battlefield[] = [
   { id: 'river-crossing', label: 'River Crossing', size: 'medium', theme: 'grass', terrain: 'river' },
 ]
 
-const SIZE_DIMS: Record<Size, { width: number; height: number }> = {
-  small: { width: 7, height: 5 },
-  medium: { width: 8, height: 6 },
-  large: { width: 10, height: 7 },
-}
-
 /** The battlefield for a seed: reproducible, so the same seed replays it. */
 function battlefieldForSeed(seed: string): Battlefield {
   return BATTLEFIELDS[new Rng(`field:${seed}`).int(0, BATTLEFIELDS.length - 1)]
@@ -94,46 +88,72 @@ function generateTerrain(
   const slow = new Set<string>()
   const kinds = new Map<string, TerrainKind>()
   const key = (q: number, r: number) => `${q},${r}`
+  const box: Field = { width, height }
+  const lo = cols
+  const hi = width - cols // middle band [lo, hi): between the deployment zones
+  const candidates: string[] = []
 
-  if (terrain === 'field') return { blockedEdges, slow, kinds }
+  // Rough, slow ground for the rough battlefields (deployment zones stay clear).
+  if (terrain === 'rockfield' || terrain === 'jungle' || terrain === 'streets') {
+    const kind: TerrainKind = terrain === 'rockfield' ? 'rock' : terrain === 'jungle' ? 'tree' : 'building'
+    const density = terrain === 'streets' ? 0.3 : terrain === 'jungle' ? 0.28 : 0.22
+    for (let q = lo; q < hi; q++) {
+      for (let r = 0; r < height; r++) {
+        if (rng.chance(density)) {
+          slow.add(key(q, r))
+          kinds.set(key(q, r), kind)
+        }
+      }
+    }
+  }
 
+  // River: an impassable line down the centre boundary, save a bridge and a ford.
   if (terrain === 'river') {
-    // An impassable river down the boundary between two centre columns, save a
-    // bridge and a ford where units may cross.
     const c = Math.floor(width / 2) - 1
     const crossings = [Math.floor(height / 3), Math.floor((2 * height) / 3)]
+    const open = new Set(crossings.map((r) => edgeKey({ q: c, r }, { q: c + 1, r })))
     for (let r = 0; r < height; r++) {
       for (const b of [{ q: c + 1, r }, { q: c + 1, r: r - 1 }]) {
-        if (b.r >= 0 && b.r < height) blockedEdges.add(edgeKey({ q: c, r }, b))
+        if (b.r < 0 || b.r >= height) continue
+        const ek = edgeKey({ q: c, r }, b)
+        if (!open.has(ek)) candidates.push(ek)
       }
     }
     crossings.forEach((r, i) => {
-      blockedEdges.delete(edgeKey({ q: c, r }, { q: c + 1, r })) // open the crossing
       const kind: TerrainKind = i === 0 ? 'bridge' : 'ford'
       kinds.set(key(c, r), kind)
       kinds.set(key(c + 1, r), kind)
     })
-    return { blockedEdges, slow, kinds }
   }
 
-  // Rough, slow ground scattered in the middle band (deployment zones stay clear).
-  const kind: TerrainKind = terrain === 'rockfield' ? 'rock' : terrain === 'jungle' ? 'tree' : 'building'
-  const density = terrain === 'streets' ? 0.3 : terrain === 'jungle' ? 0.28 : 0.22
-  for (let q = cols; q < width - cols; q++) {
-    for (let r = 0; r < height; r++) {
-      if (rng.chance(density)) {
-        slow.add(key(q, r))
-        kinds.set(key(q, r), kind)
-      }
+  // Every map gets a few scattered impassable edges (walls, ditches) in the middle.
+  if (terrain !== 'river' && hi > lo) {
+    const scatter = terrain === 'field' ? 3 : 4
+    for (let i = 0; i < scatter; i++) {
+      const a = { q: lo + rng.int(0, hi - lo - 1), r: rng.int(0, height - 1) }
+      const ns = neighboursInField(box, a)
+      if (ns.length) candidates.push(edgeKey(a, ns[rng.int(0, ns.length - 1)]))
     }
   }
+
+  // Cap so no hex is walled on more than three of its sides.
+  for (const ek of capBlockedEdges(candidates, 3)) blockedEdges.add(ek)
   return { blockedEdges, slow, kinds }
 }
 
-const INITIAL_FIELD: Field = { ...SIZE_DIMS[battlefieldForSeed('skirmish-1').size] }
+const MAX_PARTY = 8 // party-size cap; the field grows to fit the larger party
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 const deployColsFor = (field: Field) => Math.max(1, Math.min(MAX_DEPLOY_COLS, Math.floor(field.width / 2)))
+
+/** Field size grows with the larger party; the area's size class widens it. */
+function fieldFor(bf: Battlefield, partySize: number): { width: number; height: number } {
+  const height = clamp(Math.max(partySize, 4) + 1, 5, 12)
+  const extra = bf.size === 'large' ? 7 : bf.size === 'medium' ? 5 : 3
+  return { width: clamp(height + extra, 7, 16), height }
+}
+
+const INITIAL_FIELD: Field = fieldFor(battlefieldForSeed('skirmish-1'), 4)
 
 function hexToPixel(q: number, r: number): { x: number; y: number } {
   return { x: HEX * SQRT3 * (q + r / 2), y: HEX * 1.5 * r }
@@ -155,6 +175,53 @@ function initials(name: string): string {
     .join('')
     .slice(0, 2)
     .toUpperCase()
+}
+
+// A small crown drawn above hero tokens, so heroes read differently from mooks.
+const CROWN = <path className="unit__crown" d="M -7 -19 L -7 -26 L -3 -21 L 0 -29 L 3 -21 L 7 -26 L 7 -19 Z" />
+const isHero = (sheetId: string) => combatantById(sheetId)?.rank === 'hero'
+
+/** A little hexagon swatch that reuses the map's terrain classes, so the modal's
+ * colours match exactly what is on screen for the current battlefield. */
+function HexSwatch({ theme, kind, edge }: { theme: Theme; kind?: TerrainKind; edge?: boolean }) {
+  const s = 15
+  const pts = Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (60 * i - 30)
+    return `${(18 + s * Math.cos(a)).toFixed(1)},${(18 + s * Math.sin(a)).toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg className={`swatch-hex theme-${theme}`} viewBox="0 0 36 36" width="36" height="36" aria-hidden="true">
+      <polygon className={`hex-cell${kind ? ` hex-terrain--${kind}` : ''}`} points={pts} />
+      {edge && <line x1="18" y1="4" x2="18" y2="32" stroke="#111111" strokeWidth="5" strokeLinecap="round" />}
+    </svg>
+  )
+}
+
+interface LegendEntry {
+  title: string
+  desc: string
+  kind?: TerrainKind
+  edge?: boolean
+}
+
+/** The terrain legend for the active battlefield, so the modal only shows what is
+ * actually on the current map. */
+function legendFor(bf: Battlefield): LegendEntry[] {
+  switch (bf.terrain) {
+    case 'field':
+      return [{ title: 'Open ground', desc: 'no terrain modifiers — units move freely.' }]
+    case 'rockfield':
+      return [{ title: 'Rocky ground', desc: 'rough: costs double to move into (half speed).', kind: 'rock' }]
+    case 'jungle':
+      return [{ title: 'Dense jungle', desc: 'rough: costs double to move into (half speed).', kind: 'tree' }]
+    case 'streets':
+      return [{ title: 'Congested streets', desc: 'rough: costs double to move into (half speed).', kind: 'building' }]
+    case 'river':
+      return [
+        { title: 'Bridge', desc: 'a crossing over the river.', kind: 'bridge' },
+        { title: 'Ford', desc: 'a shallow crossing.', kind: 'ford' },
+      ]
+  }
 }
 
 interface PlayerUnit {
@@ -333,10 +400,11 @@ export function SkirmishView() {
     battlefieldMode === 'auto'
       ? battlefieldForSeed(seed)
       : BATTLEFIELDS.find((b) => b.id === battlefieldMode) ?? battlefieldForSeed(seed)
+  const partySize = Math.max(playerParty.length, enemyParty.length, 1)
   useEffect(() => {
-    const dims = SIZE_DIMS[activeBattlefield.size]
+    const dims = fieldFor(activeBattlefield, partySize)
     setField((f) => (f.width === dims.width && f.height === dims.height ? f : { ...f, ...dims }))
-  }, [activeBattlefield.id])
+  }, [activeBattlefield.id, partySize])
 
   const playerUnits = useMemo(() => partyToUnits(playerParty), [playerParty])
   const deployCols = useMemo(() => deployColsFor(field), [field])
@@ -369,18 +437,7 @@ export function SkirmishView() {
     for (let q = 0; q < field.width; q++) for (let r = 0; r < field.height; r++) out.push({ q, r })
     return out
   }, [field.width, field.height])
-  const maxParty = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.min(
-          field.height,
-          zoneCells(battleField, 'player', deployCols).length,
-          zoneCells(battleField, 'enemy', deployCols).length,
-        ),
-      ),
-    [battleField, field.height, deployCols],
-  )
+  const maxParty = MAX_PARTY // the field auto-sizes to fit, so the cap is fixed
 
   // Editing the player party (or the field) resets the layout and returns to
   // deploy; editing the enemy party just returns to deploy.
@@ -558,27 +615,7 @@ export function SkirmishView() {
         <button className="btn" onClick={() => setSeed(`skirmish-${Math.floor(Math.random() * 1000)}`)}>
           New seed
         </button>
-        <div className="field-ctrl" role="group" aria-label="Map size">
-          <label>
-            W
-            <input
-              type="number"
-              min={4}
-              max={14}
-              value={field.width}
-              onChange={(e) => setField((f) => ({ ...f, width: clamp(Math.round(Number(e.target.value)) || f.width, 4, 14) }))}
-            />
-          </label>
-          <label>
-            H
-            <input
-              type="number"
-              min={3}
-              max={12}
-              value={field.height}
-              onChange={(e) => setField((f) => ({ ...f, height: clamp(Math.round(Number(e.target.value)) || f.height, 3, 12) }))}
-            />
-          </label>
+        <div className="field-ctrl" role="group" aria-label="Battlefield">
           <label>
             Area
             <select value={battlefieldMode} onChange={(e) => setBattlefieldMode(e.target.value)}>
@@ -591,7 +628,7 @@ export function SkirmishView() {
             </select>
           </label>
           <span className="hint">
-            {activeBattlefield.label} · {hexes.length} hexes
+            {activeBattlefield.label} · {field.width}×{field.height} · {hexes.length} hexes
           </span>
         </div>
         <button className="btn" onClick={() => setShowTerrain(true)}>
@@ -669,6 +706,7 @@ export function SkirmishView() {
                       <text className="unit__tag" y={4}>
                         {initials(u.name)}
                       </text>
+                      {u.rank === 'hero' && CROWN}
                       {st !== 'dead' && (
                         <>
                           <rect className="unit__hp-bg" x={-barW / 2} y={-HEX * 0.9} width={barW} height={5} rx={2} />
@@ -721,6 +759,7 @@ export function SkirmishView() {
                         <text className="unit__tag" y={4}>
                           {initials(u.name)}
                         </text>
+                        {isHero(u.sheetId) && CROWN}
                       </g>
                     )
                   }),
@@ -732,6 +771,7 @@ export function SkirmishView() {
                         <text className="unit__tag" y={4}>
                           {initials(p.sheet.name)}
                         </text>
+                        {p.sheet.rank === 'hero' && CROWN}
                       </g>
                     )
                   }),
@@ -877,27 +917,26 @@ export function SkirmishView() {
       {showTerrain && (
         <div className="modal-backdrop" onClick={() => setShowTerrain(false)}>
           <div className="modal" role="dialog" aria-label="Terrain" onClick={(e) => e.stopPropagation()}>
-            <h2>Terrain</h2>
+            <h2>Terrain — {activeBattlefield.label}</h2>
             <ul className="modal__list">
-              <li>
-                <span className="swatch swatch--edge" />
-                <span>
-                  <strong>Impassable border</strong> — a thick line (a river or wall) units cannot cross.
-                  Cross only at a gap: a <em>bridge</em> or a <em>ford</em>. Ranged attacks still fire over it.
-                </span>
-              </li>
-              <li>
-                <span className="swatch swatch--slow" />
-                <span>
-                  <strong>Rough ground</strong> — rock, jungle or streets. Costs double to move into
-                  (half movement speed).
-                </span>
-              </li>
+              {legendFor(activeBattlefield).map((e, i) => (
+                <li key={i}>
+                  <HexSwatch theme={activeBattlefield.theme} kind={e.kind} edge={e.edge} />
+                  <span>
+                    <strong>{e.title}</strong> — {e.desc}
+                  </span>
+                </li>
+              ))}
             </ul>
-            <p className="hint">
-              Great Fields and The Gold Sea are open. Ashfall, Ironwood Forest and Goldspring are rough.
-              River Crossing is split by a river with a bridge and a ford.
-            </p>
+            <h3 className="modal__subhead">Impassable edges</h3>
+            <div className="modal__edge">
+              <HexSwatch theme={activeBattlefield.theme} edge />
+              <span>
+                Thick borders (rivers, walls, ditches) block movement: melee cannot strike across one,
+                though ranged fires over it. Cross only at a gap such as a bridge or ford. No hex is
+                ever walled on more than three of its sides.
+              </span>
+            </div>
             <button className="btn" onClick={() => setShowTerrain(false)}>
               Close
             </button>
